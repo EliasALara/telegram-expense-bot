@@ -1,19 +1,18 @@
-# Telegram version of the bot
-
 import os
 import urllib.parse
 import logging
+import threading
 from dotenv import load_dotenv
 from openai import OpenAI
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+from flask import Flask
 
-# Load environment variables
+# Load .env
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# OpenAI client
 client = OpenAI(api_key=openai_api_key)
 
 # Allowed subcategories (for filtering)
@@ -21,7 +20,7 @@ allowed_subcategories = [
     "Snacks", "Fiction", "Non-fiction", "Side Hustle", "Parents", "Private", "Public"
 ]
 
-# Handle incoming messages
+# Handle messages
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_msg = update.message.text
     print("Incoming message:", user_msg)
@@ -69,13 +68,13 @@ Output:
         raw_output = response.choices[0].message.content.strip()
         print("Raw OpenAI output:", raw_output)
 
-        # Clean up code block formatting
+        # Remove backticks/code block
         if raw_output.startswith("```"):
             raw_output = raw_output.strip("`").strip()
             if raw_output.startswith("json"):
                 raw_output = raw_output[4:].strip()
 
-        data = eval(raw_output)  # Use json.loads() in production
+        data = eval(raw_output)
 
         query_data = {
             "amount": data["amount"],
@@ -88,19 +87,29 @@ Output:
         if subcat in allowed_subcategories:
             query_data["subcategory"] = subcat
 
-        query_string = urllib.parse.urlencode(query_data)
-        link = f"https://cashewapp.web.app/addTransaction?{query_string}"
-
+        link = f"https://cashewapp.web.app/addTransaction?" + urllib.parse.urlencode(query_data)
         await update.message.reply_text(link)
 
     except Exception as e:
         print("Error:", e)
         await update.message.reply_text("Sorry, I couldn't understand that expense message.")
 
-# Set up and run the bot
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+# Bot runner in a separate thread
+def run_telegram_bot():
     app = ApplicationBuilder().token(telegram_token).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     print("Telegram bot is running...")
     app.run_polling()
+
+# Start bot in background
+threading.Thread(target=run_telegram_bot).start()
+
+# Flask web server to stay awake
+web = Flask(__name__)
+
+@web.route("/")
+def home():
+    return "Bot is running!"
+
+if __name__ == "__main__":
+    web.run(host="0.0.0.0", port=10000)
