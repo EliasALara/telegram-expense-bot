@@ -1,12 +1,13 @@
 import os
 import urllib.parse
 import logging
-import threading
+import asyncio
 from dotenv import load_dotenv
 from openai import OpenAI
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 from flask import Flask
+from threading import Thread
 
 # Load .env
 load_dotenv()
@@ -20,7 +21,17 @@ allowed_subcategories = [
     "Snacks", "Fiction", "Non-fiction", "Side Hustle", "Parents", "Private", "Public"
 ]
 
-# Handle messages
+# Flask web server to stay awake
+web = Flask(__name__)
+
+@web.route("/")
+def home():
+    return "Bot is running!"
+
+def run_flask():
+    web.run(host="0.0.0.0", port=10000)
+
+# Telegram message handler
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_msg = update.message.text
     print("Incoming message:", user_msg)
@@ -68,13 +79,13 @@ Output:
         raw_output = response.choices[0].message.content.strip()
         print("Raw OpenAI output:", raw_output)
 
-        # Remove backticks/code block
+        # Remove code block formatting
         if raw_output.startswith("```"):
             raw_output = raw_output.strip("`").strip()
             if raw_output.startswith("json"):
                 raw_output = raw_output[4:].strip()
 
-        data = eval(raw_output)
+        data = eval(raw_output)  # Replace with json.loads() in production
 
         query_data = {
             "amount": data["amount"],
@@ -87,29 +98,26 @@ Output:
         if subcat in allowed_subcategories:
             query_data["subcategory"] = subcat
 
-        link = f"https://cashewapp.web.app/addTransaction?" + urllib.parse.urlencode(query_data)
+        link = "https://cashewapp.web.app/addTransaction?" + urllib.parse.urlencode(query_data)
         await update.message.reply_text(link)
 
     except Exception as e:
         print("Error:", e)
         await update.message.reply_text("Sorry, I couldn't understand that expense message.")
 
-# Bot runner in a separate thread
-def run_telegram_bot():
+# Run Telegram bot
+async def run_bot():
     app = ApplicationBuilder().token(telegram_token).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     print("Telegram bot is running...")
-    app.run_polling()
+    await app.run_polling()
 
-# Start bot in background
-threading.Thread(target=run_telegram_bot).start()
-
-# Flask web server to stay awake
-web = Flask(__name__)
-
-@web.route("/")
-def home():
-    return "Bot is running!"
-
+# Main entry point
 if __name__ == "__main__":
-    web.run(host="0.0.0.0", port=10000)
+    logging.basicConfig(level=logging.INFO)
+
+    # Run Flask in background thread
+    Thread(target=run_flask).start()
+
+    # Start Telegram bot (async)
+    asyncio.run(run_bot())
